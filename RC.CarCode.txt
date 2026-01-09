@@ -1,0 +1,242 @@
+
+#include <WiFi.h>               // ESP32 Wi-Fi library
+#include <WebServer.h>          // Web server library for handling HTTP requests
+#include <Arduino.h>            // Core Arduino framework
+
+// ====== Wi-Fi credentials ======
+const char* ssid     = "Paddys iPhone";   // Name of Wi-Fi hotspot or router
+const char* password = "12345678";        // Wi-Fi password
+
+// ====== Web server ======
+WebServer server(80);            // Create a web server object on port 80 (standard HTTP port)
+
+// ====== Motor pins ======
+int motor1Pin1 = 27;             // Motor 1 control pin A
+int motor1Pin2 = 26;             // Motor 1 control pin B
+int motor2Pin1 = 33;             // Motor 2 control pin A
+int motor2Pin2 = 25;             // Motor 2 control pin B
+
+// ====== Dashboard LEDs ======
+int headlightLED = 14;           // LED representing headlights
+int leftIndicatorLED = 12;       // LED showing left turn signal
+int rightIndicatorLED = 13;      // LED showing right turn signal
+
+// ====== Buzzer Pin ======
+int buzzerPin = 15;
+
+// ====== Thermistor ======
+int thermistorPin = 34;          // Analog ADC pin input for temperature sensor
+
+// ====== HTML Interface served to the user ======
+const char htmlPage[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+  html, body { font-family: Arial; text-align:center; background:#ffe8b3; }
+  h1 { background:#ff6f61; color:white; padding:20px; }
+  .button { padding:20px 40px; font-size:24px; margin:10px; border-radius:12px; color:white; border:none; }
+  .forward{background:#4CAF50;} .reverse{background:#e67e22;}
+  .left{background:#3498db;} .right{background:#9b59b6;}
+  .stop{background:#e74c3c;}
+  .ledbtn{background:#555;}
+</style>
+
+<script>
+// Sends a movement/LED command to the ESP32
+function sendCommand(cmd){
+  fetch('/' + cmd);
+  document.getElementById('status').innerText = 'Command: ' + cmd;
+}
+
+// Continuously request temperature from ESP32
+function updateTemp(){
+  fetch('/temperature')
+    .then(response => response.text())
+    .then(data => { document.getElementById('temp').innerText = data + " °C"; });
+}
+
+// Update temperature every second
+setInterval(updateTemp, 1000);
+</script>
+</head>
+
+<body>
+<h1>ESP32 Wi-Fi Car Control</h1>
+
+<!-- Movement buttons -->
+<button class="button forward" onclick="sendCommand('forward')">Forward</button><br>
+<button class="button left" onclick="sendCommand('left')">Left</button>
+<button class="button stop" onclick="sendCommand('stop')">Stop</button>
+<button class="button right" onclick="sendCommand('right')">Right</button><br>
+<button class="button reverse" onclick="sendCommand('reverse')">Reverse</button>
+
+<!-- Dashboard LEDs -->
+<h2>Dashboard LEDs</h2>
+<button class="button ledbtn" onclick="sendCommand('toggleHeadlights')">Toggle Headlights</button><br>
+<button class="button ledbtn" onclick="sendCommand('leftIndicator')">Left Indicator</button>
+<button class="button ledbtn" onclick="sendCommand('rightIndicator')">Right Indicator</button>
+
+<!-- Temperature display -->
+<h2>Temperature</h2>
+<p id="temp">-- °C</p>
+
+<p id="status">Ready</p>
+
+</body>
+</html>
+)rawliteral";
+
+// ====== LED States ======
+bool headlightsOn = false;         // Stores whether headlights are on or off
+bool leftOn = false;               // Stores state of left indicator
+bool rightOn = false;              // Stores state of right indicator
+
+// ====== Motor Control Functions ======
+// These functions control the direction of the motors
+
+void hornBeep() {
+  tone(buzzerPin, 3000); // 3kHz beep
+  delay(200);
+  noTone(buzzerPin);
+}
+
+void forward() {
+  digitalWrite(motor1Pin1, HIGH);  // Motor 1 forward
+  digitalWrite(motor1Pin2, LOW);
+  digitalWrite(motor2Pin1, HIGH);  // Motor 2 forward
+  digitalWrite(motor2Pin2, LOW);
+}
+
+void reverse() {
+  digitalWrite(motor1Pin1, LOW);   // Motor 1 backward
+  digitalWrite(motor1Pin2, HIGH);
+  digitalWrite(motor2Pin1, LOW);   // Motor 2 backward
+  digitalWrite(motor2Pin2, HIGH);
+}
+
+void leftTurn() {
+  digitalWrite(motor1Pin1, LOW);   // Stop left wheel
+  digitalWrite(motor1Pin2, LOW);
+  digitalWrite(motor2Pin1, HIGH);  // Move right wheel forward
+  digitalWrite(motor2Pin2, LOW);
+}
+
+void rightTurn() {
+  digitalWrite(motor1Pin1, HIGH);  // Move left wheel forward
+  digitalWrite(motor1Pin2, LOW);
+  digitalWrite(motor2Pin1, LOW);   // Stop right wheel
+  digitalWrite(motor2Pin2, LOW);
+}
+
+void stopCar() {
+  digitalWrite(motor1Pin1, LOW);   // Stop both motors
+  digitalWrite(motor1Pin2, LOW);
+  digitalWrite(motor2Pin1, LOW);
+  digitalWrite(motor2Pin2, LOW);
+}
+
+// ====== LED Control Functions ======
+void toggleHeadlights() {
+  headlightsOn = !headlightsOn;                          // Flip state
+  digitalWrite(headlightLED, headlightsOn ? HIGH : LOW); // Apply state
+}
+
+void toggleLeftIndicator() {
+  leftOn = !leftOn;
+  digitalWrite(leftIndicatorLED, leftOn ? HIGH : LOW);   // Turn LED on/off
+}
+
+void toggleRightIndicator() {
+  rightOn = !rightOn;
+  digitalWrite(rightIndicatorLED, rightOn ? HIGH : LOW); // Turn LED on/off
+}
+  // Buzzer
+  pinMode(buzzerPin, OUTPUT);
+  digitalWrite(buzzerPin, LOW);
+
+// ====== Temperature Reading ======
+// Converts thermistor value to Celsius
+float readTemperature() {
+  int adcValue = analogRead(thermistorPin);              // Read ADC (0–4095)
+  float voltage = adcValue * (3.3 / 4095.0);             // Convert ADC to voltage
+
+  // Compute thermistor resistance
+  float resistance = (3.3 / voltage - 1) * 10000;        // Voltage divider formula
+
+  // Steinhart–Hart equation for thermistors
+  float temperature = 1 / (0.001129148 +
+                           (0.000234125 * log(resistance)) +
+                           (0.0000000876741 * pow(log(resistance), 3)));
+
+  return temperature - 273.15;                           // Kelvin → Celsius
+}
+
+// ====== HTTP Handlers ======
+void handleRoot() { server.send(200, "text/html", htmlPage); }   // Serve dashboard
+void handleForward() { forward(); server.send(200); }            // Move forward
+void handleReverse() { reverse(); server.send(200); }            // Move backward
+void handleLeft() { leftTurn(); server.send(200); }              // Turn left
+void handleRight() { rightTurn(); server.send(200); }            // Turn right
+void handleStop() { stopCar(); server.send(200); }               // Stop motors
+
+void handleHeadlights() { toggleHeadlights(); server.send(200); } // Toggle headlights
+void handleLeftLED() { toggleLeftIndicator(); server.send(200); } // Toggle left LED
+void handleRightLED() { toggleRightIndicator(); server.send(200); } // Toggle right LED
+
+void handleTemp() {
+  float temp = readTemperature();                                  // Get temperature
+  server.send(200, "text/plain", String(temp, 1));                 // Send to browser
+}
+
+// ====== Setup ======
+void setup() {
+  Serial.begin(115200);                                            // Start serial monitor
+
+  // Configure motor pins as outputs
+  pinMode(motor1Pin1, OUTPUT);
+  pinMode(motor1Pin2, OUTPUT);
+  pinMode(motor2Pin1, OUTPUT);
+  pinMode(motor2Pin2, OUTPUT);
+
+  // Configure LEDs as outputs
+  pinMode(headlightLED, OUTPUT);
+  pinMode(leftIndicatorLED, OUTPUT);
+  pinMode(rightIndicatorLED, OUTPUT);
+
+  stopCar();                                                       // Ensure motors are off
+
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nConnected!");                                  // Successful Wi-Fi connection
+  Serial.println(WiFi.localIP());                                  // Show IP address
+
+  // Link URL paths to functions
+  server.on("/", handleRoot);
+  server.on("/forward", handleForward);
+  server.on("/reverse", handleReverse);
+  server.on("/left", handleLeft);
+  server.on("/right", handleRight);
+  server.on("/stop", handleStop);
+
+  server.on("/toggleHeadlights", handleHeadlights);
+  server.on("/leftIndicator", handleLeftLED);
+  server.on("/rightIndicator", handleRightLED);
+
+  server.on("/temperature", handleTemp);
+
+  server.begin();                                                   // Start web server
+}
+
+// ====== Main Loop ======
+void loop() {
+  server.handleClient();                                            // Process incoming clients
+}
