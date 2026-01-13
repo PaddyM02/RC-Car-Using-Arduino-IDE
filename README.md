@@ -64,4 +64,9 @@ Update the Wi-Fi credentials in your code:
 
 ```cpp
 const char* ssid     = "Paddys Iphone";     
-const char* password = "12345678"; 
+const char* password = "12345678";
+
+
+
+Image of Physical Project <img width="870" height="660" alt="image" src="https://github.com/user-attachments/assets/2cdc833c-704b-4860-9836-45aaa39e33c6" />
+
