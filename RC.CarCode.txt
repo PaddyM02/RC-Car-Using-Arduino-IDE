@@ -79,9 +79,9 @@ setInterval(updateTemp, 1000);
 </html>
 )rawliteral";
 
-bool headlightsOn = false;         // Stores whether headlights are on or off
-bool leftOn = false;               // Stores state of left indicator
-bool rightOn = false;              // Stores state of right indicator
+bool headlightsOn = false;         
+bool leftOn = false;               
+bool rightOn = false;              
 
 
 
